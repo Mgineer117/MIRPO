@@ -1,0 +1,140 @@
+[INFO][AppLauncher]: Using device: cuda:0
+[INFO][AppLauncher]: Loading experience file: /home/minjae/IsaacLab/apps/isaaclab.python.headless.kit
+[INFO]: Parsing configuration from: MIRPO.tasks.direct.mirpo_marl.mirpo_marl_env_cfg:MirpoMarlEnvCfg
+[INFO]: Parsing configuration from: /home/minjae/Documents/research/MIRPO/source/MIRPO/MIRPO/tasks/direct/mirpo_marl/agents/skrl_mappo_cfg.yaml
+[INFO] Logging experiment in directory: /home/minjae/Documents/research/MIRPO/logs/skrl/cart_double_pendulum_direct
+Exact experiment name requested from command line: 2026-02-27_15-52-10_mappo_torch
+[2026-02-27 15:52:10,194][__main__][WARNING] - IO descriptors are only supported for manager based RL environments. No IO descriptors will be exported.
+
+[36m======================================================================================[0m
+[36m[1m[INFO][IsaacLab]: Logging to file: /tmp/isaaclab/logs/isaaclab_2026-02-27_15-52-10.log[0m
+[36m======================================================================================[0m
+
+[33m15:52:10 [simulation_context.py] WARNING: The `enable_external_forces_every_iteration` parameter in the PhysxCfg is set to False. If you are experiencing noisy velocities, consider enabling this flag. You may need to slightly increase the number of velocity iterations (setting it to 1 or 2 rather than 0), together with this flag, to improve the accuracy of velocity updates.[0m
+[38;20m[skrl:INFO] Environment wrapper: Isaac Lab (multi-agent)[0m
+[38;20m[skrl:INFO] Seed: 42[0m
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/minjae/.netrc.
+wandb: Currently logged in as: mj-research117 (UIUC-LIRA) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.24.2
+wandb: Run data is saved locally in /home/minjae/Documents/research/MIRPO/wandb/run-20260227_155213-wkycuvkh
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run 2026-02-27_15-52-10_mappo_torch
+wandb: ⭐️ View project at https://wandb.ai/UIUC-LIRA/MIRPO-scripts_skrl
+wandb: 🚀 View run at https://wandb.ai/UIUC-LIRA/MIRPO-scripts_skrl/runs/wkycuvkh
+[INFO]: Base environment:
+	Environment device    : cuda:0
+	Environment seed      : 42
+	Physics step-size     : 0.02
+	Rendering step-size   : 0.04
+	Environment step-size : 0.04
+[INFO]: Time taken for scene creation : 0.715389 seconds
+[INFO]: Scene manager:  <class InteractiveScene>
+	Number of environments: 4
+	Environment spacing   : 6.0
+	Source prim name      : /World/envs/env_0
+	Global prim paths     : []
+	Replicate physics     : True
+[INFO]: Starting the simulation. This may take a few seconds. Please wait...
+[INFO]: Time taken for simulation start : 0.448061 seconds
+[INFO]: Completed setting up the environment...
+==================================================
+Model (role): policy
+==================================================
+
+class GaussianModel(GaussianMixin, Model):
+    def __init__(self, observation_space, action_space, device, clip_actions,
+                    clip_log_std, min_log_std, max_log_std, reduction="sum"):
+        Model.__init__(self, observation_space, action_space, device)
+        GaussianMixin.__init__(self, clip_actions, clip_log_std, min_log_std, max_log_std, reduction)
+
+        self.net_container = nn.Sequential(
+            nn.LazyLinear(out_features=128),
+            nn.Tanh(),
+            nn.LazyLinear(out_features=128),
+            nn.Tanh(),
+            nn.LazyLinear(out_features=self.num_actions),
+        )
+        self.log_std_parameter = nn.Parameter(torch.full(size=(self.num_actions,), fill_value=0.0), requires_grad=True)
+
+    def compute(self, inputs, role=""):
+        states = unflatten_tensorized_space(self.observation_space, inputs.get("states"))
+        taken_actions = unflatten_tensorized_space(self.action_space, inputs.get("taken_actions"))
+        output = self.net_container(states)
+        return output, self.log_std_parameter, {}
+    
+--------------------------------------------------
+==================================================
+Model (role): value
+==================================================
+
+class DeterministicModel(DeterministicMixin, Model):
+    def __init__(self, observation_space, action_space, device, clip_actions):
+        Model.__init__(self, observation_space, action_space, device)
+        DeterministicMixin.__init__(self, clip_actions)
+
+        self.net_container = nn.Sequential(
+            nn.LazyLinear(out_features=256),
+            nn.Tanh(),
+            nn.LazyLinear(out_features=256),
+            nn.Tanh(),
+            nn.LazyLinear(out_features=1),
+        )
+
+    def compute(self, inputs, role=""):
+        states = unflatten_tensorized_space(self.observation_space, inputs.get("states"))
+        taken_actions = unflatten_tensorized_space(self.action_space, inputs.get("taken_actions"))
+        output = self.net_container(states)
+        return output, {}
+    
+--------------------------------------------------
+==================================================
+Model (role): policy
+==================================================
+
+class GaussianModel(GaussianMixin, Model):
+    def __init__(self, observation_space, action_space, device, clip_actions,
+                    clip_log_std, min_log_std, max_log_std, reduction="sum"):
+        Model.__init__(self, observation_space, action_space, device)
+        GaussianMixin.__init__(self, clip_actions, clip_log_std, min_log_std, max_log_std, reduction)
+
+        self.net_container = nn.Sequential(
+            nn.LazyLinear(out_features=128),
+            nn.Tanh(),
+            nn.LazyLinear(out_features=128),
+            nn.Tanh(),
+            nn.LazyLinear(out_features=self.num_actions),
+        )
+        self.log_std_parameter = nn.Parameter(torch.full(size=(self.num_actions,), fill_value=0.0), requires_grad=True)
+
+    def compute(self, inputs, role=""):
+        states = unflatten_tensorized_space(self.observation_space, inputs.get("states"))
+        taken_actions = unflatten_tensorized_space(self.action_space, inputs.get("taken_actions"))
+        output = self.net_container(states)
+        return output, self.log_std_parameter, {}
+    
+--------------------------------------------------
+==================================================
+Model (role): value
+==================================================
+
+class DeterministicModel(DeterministicMixin, Model):
+    def __init__(self, observation_space, action_space, device, clip_actions):
+        Model.__init__(self, observation_space, action_space, device)
+        DeterministicMixin.__init__(self, clip_actions)
+
+        self.net_container = nn.Sequential(
+            nn.LazyLinear(out_features=256),
+            nn.Tanh(),
+            nn.LazyLinear(out_features=256),
+            nn.Tanh(),
+            nn.LazyLinear(out_features=1),
+        )
+
+    def compute(self, inputs, role=""):
+        states = unflatten_tensorized_space(self.observation_space, inputs.get("states"))
+        taken_actions = unflatten_tensorized_space(self.action_space, inputs.get("taken_actions"))
+        output = self.net_container(states)
+        return output, {}
+    
+--------------------------------------------------
+  0%|          | 0/20000 [00:00<?, ?it/s]  0%|          | 3/20000 [00:00<11:34, 28.80it/s]  0%|          | 22/20000 [00:00<02:44, 121.72it/s]  0%|          | 43/20000 [00:00<02:04, 160.72it/s]  0%|          | 65/20000 [00:00<01:49, 181.66it/s]  0%|          | 86/20000 [00:00<01:44, 191.38it/s]  1%|          | 109/20000 [00:00<01:38, 202.24it/s]  1%|          | 131/20000 [00:00<01:35, 207.53it/s]  1%|          | 154/20000 [00:00<01:33, 212.22it/s]  1%|          | 176/20000 [00:00<01:32, 214.24it/s]  1%|          | 198/20000 [00:01<01:33, 211.98it/s]  1%|          | 220/20000 [00:01<01:32, 213.81it/s]  1%|          | 242/20000 [00:01<01:31, 215.14it/s]  1%|▏         | 264/20000 [00:01<01:31, 214.85it/s]  1%|▏         | 286/20000 [00:01<01:31, 215.39it/s]  2%|▏         | 308/20000 [00:01<01:32, 213.04it/s]  2%|▏         | 330/20000 [00:01<01:32, 213.44it/s]  2%|▏         | 352/20000 [00:01<01:32, 213.39it/s]  2%|▏         | 375/20000 [00:01<01:30, 215.77it/s]  2%|▏         | 397/20000 [00:01<01:30, 215.72it/s]  2%|▏         | 420/20000 [00:02<01:29, 217.56it/s]  2%|▏         | 443/20000 [00:02<01:29, 218.80it/s]  2%|▏         | 465/20000 [00:02<01:29, 217.51it/s]  2%|▏         | 487/20000 [00:02<01:29, 217.66it/s]  3%|▎         | 509/20000 [00:02<01:29, 216.82it/s]  3%|▎         | 531/20000 [00:02<01:31, 212.03it/s]  3%|▎         | 553/20000 [00:02<01:32, 210.02it/s]  3%|▎         | 576/20000 [00:02<01:30, 213.60it/s]  3%|▎         | 598/20000 [00:02<01:31, 212.26it/s]  3%|▎         | 620/20000 [00:02<01:32, 210.52it/s]  3%|▎         | 643/20000 [00:03<01:30, 213.98it/s]  3%|▎         | 666/20000 [00:03<01:28, 218.02it/s]  3%|▎         | 688/20000 [00:03<01:28, 218.20it/s]  4%|▎         | 710/20000 [00:03<01:28, 217.91it/s]  4%|▎         | 733/20000 [00:03<01:27, 219.45it/s]  4%|▍         | 756/20000 [00:03<01:27, 221.01it/s]  4%|▍         | 779/20000 [00:03<01:27, 219.52it/s]  4%|▍         | 802/20000 [00:03<01:26, 221.01it/s]  4%|▍         | 825/20000 [00:03<01:26, 220.83it/s]  4%|▍         | 848/20000 [00:04<01:27, 219.29it/s]  4%|▍         | 871/20000 [00:04<01:26, 220.83it/s]  4%|▍         | 894/20000 [00:04<01:26, 220.31it/s]  5%|▍         | 917/20000 [00:04<01:26, 220.44it/s]  5%|▍         | 940/20000 [00:04<01:26, 220.80it/s]  5%|▍         | 963/20000 [00:04<01:27, 217.56it/s]  5%|▍         | 986/20000 [00:04<01:26, 218.56it/s]  5%|▌         | 1008/20000 [00:04<01:26, 218.39it/s]  5%|▌         | 1030/20000 [00:04<01:45, 179.51it/s]  5%|▌         | 1051/20000 [00:05<01:41, 186.74it/s]  5%|▌         | 1071/20000 [00:05<01:41, 186.63it/s]  5%|▌         | 1091/20000 [00:05<01:41, 186.73it/s]  6%|▌         | 1111/20000 [00:05<01:42, 184.86it/s]  6%|▌         | 1130/20000 [00:05<01:43, 182.52it/s]  6%|▌         | 1149/20000 [00:05<01:42, 184.16it/s]  6%|▌         | 1169/20000 [00:05<01:40, 187.58it/s]  6%|▌         | 1189/20000 [00:05<01:38, 190.96it/s]  6%|▌         | 1210/20000 [00:05<01:35, 196.15it/s]  6%|▌         | 1232/20000 [00:05<01:32, 202.40it/s]  6%|▋         | 1253/20000 [00:06<01:31, 204.57it/s]  6%|▋         | 1275/20000 [00:06<01:29, 208.82it/s]  6%|▋         | 1297/20000 [00:06<01:28, 212.08it/s]  7%|▋         | 1319/20000 [00:06<01:27, 213.59it/s]  7%|▋         | 1341/20000 [00:06<01:26, 214.85it/s]  7%|▋         | 1363/20000 [00:06<01:27, 212.89it/s]  7%|▋         | 1385/20000 [00:06<01:28, 210.42it/s]  7%|▋         | 1407/20000 [00:06<01:28, 210.32it/s]  7%|▋         | 1429/20000 [00:06<01:30, 206.26it/s]  7%|▋         | 1450/20000 [00:07<01:29, 206.50it/s]  7%|▋         | 1472/20000 [00:07<01:28, 209.63it/s]  7%|▋         | 1494/20000 [00:07<01:27, 211.30it/s]  8%|▊         | 1516/20000 [00:07<01:27, 210.56it/s]  8%|▊         | 1538/20000 [00:07<01:27, 210.46it/s]  8%|▊         | 1560/20000 [00:07<01:28, 209.24it/s]  8%|▊         | 1581/20000 [00:07<01:31, 201.97it/s]  8%|▊         | 1602/20000 [00:07<01:30, 203.84it/s]  8%|▊         | 1623/20000 [00:07<01:29, 205.35it/s]  8%|▊         | 1644/20000 [00:07<01:32, 199.15it/s]  8%|▊         | 1666/20000 [00:08<01:30, 202.62it/s]  8%|▊         | 1688/20000 [00:08<01:28, 206.17it/s]  9%|▊         | 1710/20000 [00:08<01:28, 207.82it/s]

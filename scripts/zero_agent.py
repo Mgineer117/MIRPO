@@ -57,7 +57,17 @@ def main():
         # run everything in inference mode
         with torch.inference_mode():
             # compute zero actions
-            actions = torch.zeros(env.action_space.shape, device=env.unwrapped.device)
+            actions = {
+                "cart": torch.zeros(
+                    env.action_space("cart").shape,
+                    device=env.unwrapped.device,
+                ),
+                "pendulum": torch.zeros(
+                    env.action_space("pendulum").shape,
+                    device=env.unwrapped.device,
+                ),
+            }
+
             # apply actions
             env.step(actions)
 

@@ -57,7 +57,16 @@ def main():
         # run everything in inference mode
         with torch.inference_mode():
             # sample actions from -1 to 1
-            actions = 2 * torch.rand(env.action_space.shape, device=env.unwrapped.device) - 1
+            actions = {
+                "cart": torch.rand(
+                    env.action_space("cart").shape,
+                    device=env.unwrapped.device,
+                ) - 1,
+                "pendulum": torch.rand(
+                    env.action_space("pendulum").shape,
+                    device=env.unwrapped.device,
+                ) - 1,
+            }
             # apply actions
             env.step(actions)
 
