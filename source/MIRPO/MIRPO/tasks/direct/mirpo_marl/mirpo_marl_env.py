@@ -89,6 +89,15 @@ class MirpoMarlEnv(DirectMARLEnv):
             )
 
         for agent_name in self.cfg.possible_agents:
+            # 1. Assign specific colors based on the agent's name
+            if agent_name == "agent1":
+                agent_color = (0.0, 0.0, 1.0)  # Blue
+            elif agent_name == "agent2":
+                agent_color = (1.0, 0.0, 0.0)  # Red
+            else:
+                agent_color = (0.2, 0.8, 0.2)  # Default Green fallback
+
+            # 2. Pass the assigned color into the PreviewSurfaceCfg
             sphere_cfg = sim_utils.SphereCfg(
                 radius=self.cfg.agent_radius,
                 rigid_props=RigidBodyPropertiesCfg(
@@ -98,12 +107,39 @@ class MirpoMarlEnv(DirectMARLEnv):
                 ),
                 mass_props=MassPropertiesCfg(mass=self.cfg.agent_mass),
                 collision_props=CollisionPropertiesCfg(),
-                visual_material=PreviewSurfaceCfg(diffuse_color=(0.2, 0.8, 0.2)),
+                visual_material=PreviewSurfaceCfg(diffuse_color=agent_color),
             )
+            
             sphere_cfg.func(
                 f"/World/envs/env_0/{agent_name}", 
                 sphere_cfg, 
                 translation=(0.0, 0.0, self.cfg.agent_radius)
+            )
+
+        # --- Spawn Fire Hazard Tiles (Orange/Red) ---
+        fire_cfg = sim_utils.CuboidCfg(
+            size=(self.cfg.cell_size, self.cfg.cell_size, 0.02),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.3, 0.0)),
+            # No collision props so agents just walk over it
+        )
+        for i, pos in enumerate(self.fire_positions):
+            fire_cfg.func(
+                f"/World/envs/env_0/Fire_{i}",
+                fire_cfg,
+                translation=(pos[0], pos[1], 0.01), # Slightly above ground to prevent Z-fighting
+            )
+
+        # --- Spawn Water Hazard Tiles (Blue) ---
+        water_cfg = sim_utils.CuboidCfg(
+            size=(self.cfg.cell_size, self.cfg.cell_size, 0.02),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.4, 1.0)),
+            # No collision props
+        )
+        for i, pos in enumerate(self.water_positions):
+            water_cfg.func(
+                f"/World/envs/env_0/Water_{i}",
+                water_cfg,
+                translation=(pos[0], pos[1], 0.01),
             )
 
         self.scene.clone_environments(copy_from_source=False)
@@ -135,25 +171,44 @@ class MirpoMarlEnv(DirectMARLEnv):
     # Maze parsing
     # --------------------------------------------------------
     def _parse_maze(self):
+        # Storage for static layout elements
         self.wall_positions = []
+        self.fire_positions = []
+        self.water_positions = []
+        
+        # Storage for dynamic entities
         self.agent_starts = {}
         self.shared_goal_position = None 
 
-        for i, row in enumerate(self.cfg.maze):
+        # --- 1. Parse the Layout (Static Environment) ---
+        for i, row in enumerate(self.cfg.maze_layout):
             for j, cell in enumerate(row):
                 pos = [i * self.cfg.cell_size, j * self.cfg.cell_size]
 
                 if cell == 1:
                     self.wall_positions.append(pos)
-                elif isinstance(cell, str):
-                    if cell.startswith("r"):
-                        idx = cell[1:]
-                        self.agent_starts[f"agent{idx}"] = pos
+                elif cell == "f":
+                    self.fire_positions.append(pos)
+                elif cell == "w":
+                    self.water_positions.append(pos)
+
+        # --- 2. Parse the Config (Agents & Goals) ---
+        for i, row in enumerate(self.cfg.maze_config):
+            for j, cell in enumerate(row):
+                pos = [i * self.cfg.cell_size, j * self.cfg.cell_size]
+
+                # We only care about string identifiers here to prevent duplicate walls
+                if isinstance(cell, str):
+                    if cell == "r1":
+                        self.agent_starts["agent1"] = pos
+                    elif cell == "r2":
+                        self.agent_starts["agent2"] = pos
                     elif cell == "g":
                         self.shared_goal_position = torch.tensor(pos, device=self.device)
 
+        # Safety check
         if self.shared_goal_position is None:
-            raise ValueError("No goal ('g') found in the maze configuration!")
+            raise ValueError("No goal ('g') found in the maze_config!")
 
     # --------------------------------------------------------
     # Visualization Logic
@@ -247,22 +302,52 @@ class MirpoMarlEnv(DirectMARLEnv):
     # --------------------------------------------------------
     def _get_rewards(self) -> dict[str, torch.Tensor]:
         rewards = {}
+        
+        # 1. Convert hazard lists to GPU tensors once per step (or move this to _parse_maze for max efficiency)
+        fire_tensor = torch.tensor(self.fire_positions, dtype=torch.float32, device=self.device)
+        water_tensor = torch.tensor(self.water_positions, dtype=torch.float32, device=self.device)
+        
+        # Hazard radius: If the agent is within half a cell's distance, it's "on" the tile
+        hazard_threshold = (self.cfg.cell_size / 2.0) + self.cfg.agent_radius
+
         for agent in self.cfg.possible_agents:
             pos_w = self.agent_prims[agent].data.root_pos_w
             pos_local = pos_w - self.scene.env_origins
             pos_2d = pos_local[:, :2]
             
+            # --- Goal Calculation ---
             goal_2d = self.shared_goal_position.unsqueeze(0).expand(self.num_envs, 2)
             dist = torch.norm(pos_2d - goal_2d, dim=-1)
-            
-            # Give a large reward if they are inside the threshold, otherwise a step penalty
             reached_goal = dist < self.goal_threshold
             
-            rewards[agent] = torch.where(
+            # --- Base Reward ---
+            base_reward = torch.where(
                 reached_goal, 
                 torch.full_like(dist, self.cfg.rew_goal), 
-                -dist + self.cfg.rew_step
+                1 / (dist + 1) + self.cfg.rew_step
             )
+
+            # --- Agent-Specific Hazard Penalty ---
+            hazard_penalty = torch.zeros_like(base_reward)
+
+            # Agent 1 hates Fire
+            if agent == "agent1" and len(self.fire_positions) > 0:
+                # p=float('inf') changes the hit-box from a circle to a perfect square!
+                dist_to_fires = torch.cdist(pos_2d, fire_tensor, p=float('inf'))
+                min_dist_to_fire, _ = torch.min(dist_to_fires, dim=-1)
+                
+                on_fire = min_dist_to_fire < hazard_threshold
+                hazard_penalty[on_fire] = -1.0
+
+            # Agent 2 hates Water
+            elif agent == "agent2" and len(self.water_positions) > 0:
+                dist_to_waters = torch.cdist(pos_2d, water_tensor, p=float('inf'))
+                min_dist_to_water, _ = torch.min(dist_to_waters, dim=-1)
+                
+                on_water = min_dist_to_water < hazard_threshold
+                hazard_penalty[on_water] = -1.0
+            # --- Final Reward Combination ---
+            rewards[agent] = base_reward + hazard_penalty
             
         return rewards
 
