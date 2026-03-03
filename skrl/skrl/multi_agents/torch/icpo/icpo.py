@@ -483,7 +483,8 @@ class ICPO(MultiAgent):
             r = loss_grad.dot(cost_stepdir)
             s = -cost_loss_grad.dot(cost_stepdir)
 
-            current_cost = memory.get_tensor_by_name("costs").sum() # Assuming dense costs tracked here
+            # Use the GAE-computed discounted returns instead of the raw step costs
+            current_cost = memory.get_tensor_by_name("cost_returns").mean() 
             cc = current_cost - self._cost_limit[uid]
 
             A = torch.sqrt(torch.clamp((q - (r**2) / (s + 1e-8)) / (self._kl_threshold[uid] - (cc**2) / (s + 1e-8)), min=1e-8))
