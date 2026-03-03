@@ -56,8 +56,8 @@ class MirpoMarlEnvCfg(DirectMARLEnvCfg):
     maze_config = [
         [1, 1,    1,   1, 1],
         [1, 0, 0, "g", 1],
-        [1, "r2",    1,   0, 1],
-        [1, 0, "r1",   0, 1],
+        [1, "r1",    1,   0, 1],
+        [1, 0, "r2",   0, 1],
         [1, 1,    1,   1, 1],
     ]
 
@@ -95,7 +95,7 @@ class MirpoMarlEnvCfg(DirectMARLEnvCfg):
     # Scene
     # --------------------------------------------------------
     scene = InteractiveSceneCfg(
-        num_envs=4,
+        num_envs=128,
         env_spacing=max(env_length_x, env_length_y) + 1.0,
         replicate_physics=True,
     )
@@ -113,4 +113,4 @@ class MirpoMarlEnvCfg(DirectMARLEnvCfg):
     # --------------------------------------------------------
     goal_threshold = 0.3
     rew_goal = 10.0
-    rew_step = 0.0 # -0.01
+    rew_step = 0.1 # -0.01

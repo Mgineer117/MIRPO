@@ -19,6 +19,7 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": f"{__name__}.mirpo_marl_env_cfg:MirpoMarlEnvCfg",
         "skrl_ippo_cfg_entry_point": f"{agents.__name__}:skrl_ippo_cfg.yaml",
+        "skrl_icpo_cfg_entry_point": f"{agents.__name__}:skrl_icpo_cfg.yaml",
         "skrl_mappo_cfg_entry_point": f"{agents.__name__}:skrl_mappo_cfg.yaml",
     },
 )

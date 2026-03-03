@@ -27,6 +27,15 @@ models:
         layers: [256, 256]
         activations: tanh
     output: ONE
+  cost_value:  # see deterministic_model parameters
+    class: DeterministicMixin
+    clip_actions: False
+    network:
+      - name: net
+        input: OBSERVATIONS
+        layers: [256, 256]
+        activations: tanh
+    output: ONE
 
 
 # Rollout memory
@@ -36,10 +45,9 @@ memory:
   memory_size: -1  # automatically determined (same as agent:rollouts)
 
 
-# IPPO agent configuration (field names are from IPPO_DEFAULT_CONFIG)
-# https://skrl.readthedocs.io/en/latest/api/multi_agents/ippo.html
+# ICPO agent configuration
 agent:
-  class: IPPO
+  class: ICPO
   rollouts: 1024
   learning_epochs: 8
   mini_batches: 1
@@ -72,7 +80,7 @@ agent:
     checkpoint_interval: auto
     wandb:
       project: "mirpo_marl"
-      name: "ippo_cart_double_pendulum_direct"
+      name: "icpo_cart_double_pendulum_direct"
 
 
 # Sequential trainer

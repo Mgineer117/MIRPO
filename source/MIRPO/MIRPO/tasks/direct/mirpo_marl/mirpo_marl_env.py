@@ -46,6 +46,11 @@ def define_markers(goal_radius: float) -> VisualizationMarkers:
                 scale=(0.3, 0.1, 0.5),
                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0)),
             ),
+            # Index 3: Yellow Sphere Alert for Hazards (Replaced USD)
+            "hazard_alert": sim_utils.SphereCfg(
+                radius=0.15,
+                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 1.0, 0.0)), # Bright Yellow
+            ),
         },
     )
     return VisualizationMarkers(cfg=marker_cfg)
@@ -62,6 +67,12 @@ class MirpoMarlEnv(DirectMARLEnv):
         
         super().__init__(cfg, render_mode, **kwargs)
         self._parse_maze()
+        
+        # Buffer to track which agents are currently receiving a hazard penalty
+        self.hazard_hit_buf = {
+            agent: torch.zeros(self.num_envs, device=self.device, dtype=torch.bool) 
+            for agent in self.cfg.possible_agents
+        }
 
     # --------------------------------------------------------
     # Scene setup
@@ -93,7 +104,7 @@ class MirpoMarlEnv(DirectMARLEnv):
             if agent_name == "agent1":
                 agent_color = (0.0, 0.0, 1.0)  # Blue
             elif agent_name == "agent2":
-                agent_color = (1.0, 0.0, 0.0)  # Red
+                agent_color = (1.0, 0.3, 0.0)  # Orange
             else:
                 agent_color = (0.2, 0.8, 0.2)  # Default Green fallback
 
@@ -156,15 +167,15 @@ class MirpoMarlEnv(DirectMARLEnv):
             self.scene.rigid_objects[agent_name] = self.agent_prims[agent_name]
 
         # --- Initialize Visualization Markers ---
-        # Pass the threshold to dictate the size of the visual red pad
         self.visualization_markers = define_markers(goal_radius=self.goal_threshold)
         
         all_envs = torch.arange(self.num_envs, device=self.device)
         num_agents = len(self.cfg.possible_agents)
         self.marker_indices = torch.cat([
-            torch.full_like(all_envs, 0), 
-            torch.full((self.num_envs * num_agents,), 1, device=self.device, dtype=torch.long), 
-            torch.full((self.num_envs * num_agents,), 2, device=self.device, dtype=torch.long), 
+            torch.full_like(all_envs, 0), # Goals
+            torch.full((self.num_envs * num_agents,), 1, device=self.device, dtype=torch.long), # Vel Arrows
+            torch.full((self.num_envs * num_agents,), 2, device=self.device, dtype=torch.long), # Dir Arrows
+            torch.full((self.num_envs * num_agents,), 3, device=self.device, dtype=torch.long), # Alerts
         ])
 
     # --------------------------------------------------------
@@ -225,12 +236,14 @@ class MirpoMarlEnv(DirectMARLEnv):
         goal_locs = torch.cat([goal_pos_world, torch.full((num_envs, 1), 0.01, device=self.device)], dim=-1)
         goal_rots = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat(num_envs, 1)
 
-        # 2. Agent Arrows Tensors
+        # 2. Agent Arrows and Alerts Tensors
         vel_locs, vel_rots = [], []
         dir_locs, dir_rots = [], []
+        alert_locs, alert_rots, alert_scales = [], [], []
         
-        # Calculate a single vertical offset so both arrows originate from the exact same point
+        # Calculate vertical offsets
         arrow_z_offset = torch.tensor([0.0, 0.0, self.cfg.agent_radius + 0.3], device=self.device)
+        alert_z_offset = torch.tensor([0.0, 0.0, self.cfg.agent_radius + 0.8], device=self.device)
 
         for agent in self.cfg.possible_agents:
             pos_w = self.agent_prims[agent].data.root_pos_w
@@ -249,21 +262,44 @@ class MirpoMarlEnv(DirectMARLEnv):
             goal_yaw = torch.atan2(to_goal[:, 1], to_goal[:, 0])
             dir_quat = math_utils.quat_from_angle_axis(goal_yaw.view(-1, 1), up_dir).view(-1, 4)
             
-            # Use the EXACT same offset so the arrows overlap
             dir_locs.append(pos_w + arrow_z_offset) 
             dir_rots.append(dir_quat)
 
+            # --- Hazard Alert (Yellow Sphere) ---
+            alert_locs.append(pos_w + alert_z_offset)
+            # Default rotation for spheres
+            alert_rots.append(torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).repeat(num_envs, 1))
+            
+            # If hit, scale is 1.0 (visible). If not hit, scale is 0.0 (invisible).
+            hit_scale = self.hazard_hit_buf[agent].float().unsqueeze(-1).repeat(1, 3)
+            alert_scales.append(hit_scale * 1.0) 
+
+        # Stack everything
         vel_locs = torch.cat(vel_locs, dim=0)
         vel_rots = torch.cat(vel_rots, dim=0)
+        
         dir_locs = torch.cat(dir_locs, dim=0)
         dir_rots = torch.cat(dir_rots, dim=0)
 
-        # 3. Stack everything (Strict Order: Goals, Vels, Dirs)
-        all_locs = torch.cat([goal_locs, vel_locs, dir_locs], dim=0)
-        all_rots = torch.cat([goal_rots, vel_rots, dir_rots], dim=0)
+        alert_locs = torch.cat(alert_locs, dim=0)
+        alert_rots = torch.cat(alert_rots, dim=0)
+        alert_scales = torch.cat(alert_scales, dim=0)
 
-        # 4. Render
-        self.visualization_markers.visualize(all_locs, all_rots, marker_indices=self.marker_indices)
+        # 3. Final Combined Tensors
+        all_locs = torch.cat([goal_locs, vel_locs, dir_locs, alert_locs], dim=0)
+        all_rots = torch.cat([goal_rots, vel_rots, dir_rots, alert_rots], dim=0)
+        
+        # Define scales: Goals and arrows get scale of 1.0, alerts get dynamic scale
+        default_scales = torch.ones_like(torch.cat([goal_locs, vel_locs, dir_locs], dim=0))
+        all_scales = torch.cat([default_scales, alert_scales], dim=0)
+        
+        # 4. Render with scales
+        self.visualization_markers.visualize(
+            all_locs, 
+            all_rots, 
+            scales=all_scales, 
+            marker_indices=self.marker_indices
+        )
 
     # --------------------------------------------------------
     # Actions
@@ -298,16 +334,15 @@ class MirpoMarlEnv(DirectMARLEnv):
         return obs
 
     # --------------------------------------------------------
-    # Rewards
+    # Rewards & Costs
     # --------------------------------------------------------
     def _get_rewards(self) -> dict[str, torch.Tensor]:
         rewards = {}
+        costs = {}  # Dictionary to hold our positive cost values
         
-        # 1. Convert hazard lists to GPU tensors once per step (or move this to _parse_maze for max efficiency)
         fire_tensor = torch.tensor(self.fire_positions, dtype=torch.float32, device=self.device)
         water_tensor = torch.tensor(self.water_positions, dtype=torch.float32, device=self.device)
         
-        # Hazard radius: If the agent is within half a cell's distance, it's "on" the tile
         hazard_threshold = (self.cfg.cell_size / 2.0) + self.cfg.agent_radius
 
         for agent in self.cfg.possible_agents:
@@ -315,39 +350,46 @@ class MirpoMarlEnv(DirectMARLEnv):
             pos_local = pos_w - self.scene.env_origins
             pos_2d = pos_local[:, :2]
             
-            # --- Goal Calculation ---
+            # --- Goal Calculation (Task Reward) ---
             goal_2d = self.shared_goal_position.unsqueeze(0).expand(self.num_envs, 2)
             dist = torch.norm(pos_2d - goal_2d, dim=-1)
             reached_goal = dist < self.goal_threshold
             
-            # --- Base Reward ---
+            # Base task reward (strictly for the objective)
             base_reward = torch.where(
                 reached_goal, 
                 torch.full_like(dist, self.cfg.rew_goal), 
-                1 / (dist + 1) + self.cfg.rew_step
+                self.cfg.rew_step / (dist + 1)
             )
 
-            # --- Agent-Specific Hazard Penalty ---
-            hazard_penalty = torch.zeros_like(base_reward)
+            # --- Agent-Specific Hazard Penalty (Safety Cost) ---
+            hazard_cost = torch.zeros_like(base_reward)
 
-            # Agent 1 hates Fire
             if agent == "agent1" and len(self.fire_positions) > 0:
-                # p=float('inf') changes the hit-box from a circle to a perfect square!
                 dist_to_fires = torch.cdist(pos_2d, fire_tensor, p=float('inf'))
                 min_dist_to_fire, _ = torch.min(dist_to_fires, dim=-1)
                 
                 on_fire = min_dist_to_fire < hazard_threshold
-                hazard_penalty[on_fire] = -1.0
+                self.hazard_hit_buf[agent] = on_fire # Store for visualizer
+                hazard_cost[on_fire] = 1.0  # Positive cost for ICPO
 
-            # Agent 2 hates Water
             elif agent == "agent2" and len(self.water_positions) > 0:
                 dist_to_waters = torch.cdist(pos_2d, water_tensor, p=float('inf'))
                 min_dist_to_water, _ = torch.min(dist_to_waters, dim=-1)
                 
                 on_water = min_dist_to_water < hazard_threshold
-                hazard_penalty[on_water] = -1.0
-            # --- Final Reward Combination ---
-            rewards[agent] = base_reward + hazard_penalty
+                self.hazard_hit_buf[agent] = on_water # Store for visualizer
+                hazard_cost[on_water] = 1.0  # Positive cost for ICPO
+                 
+            # --- Assignment ---
+            rewards[agent] = base_reward 
+            
+            # CRITICAL FIX: Reshape from [n] to [n, 1] for the skrl memory buffer
+            costs[agent] = hazard_cost.unsqueeze(-1)
+            
+        # Inject the costs dictionary into IsaacLab's extras buffer. 
+        # This automatically maps to the `infos` dictionary in skrl.
+        self.extras["costs"] = costs
             
         return rewards
 
@@ -367,10 +409,8 @@ class MirpoMarlEnv(DirectMARLEnv):
             goal_2d = self.shared_goal_position.unsqueeze(0).expand(self.num_envs, 2)
             dist = torch.norm(pos_2d - goal_2d, dim=-1)
             
-            # Determine if THIS specific agent reached the goal pad
             reached_goal = dist < self.goal_threshold
             
-            # Terminate if the agent reaches the goal OR the time runs out
             terminated[agent] = time_out | reached_goal
             time_outs[agent] = time_out.clone()
             
@@ -394,5 +434,8 @@ class MirpoMarlEnv(DirectMARLEnv):
             root_state[:, :3] += self.scene.env_origins[env_ids]
             
             prim.write_root_state_to_sim(root_state, env_ids)
+            
+            # Clear hazard alerts on reset
+            self.hazard_hit_buf[agent][env_ids] = False
             
         self._visualize_markers()
